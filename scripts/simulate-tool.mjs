@@ -91,6 +91,7 @@ check('get returns a rendered outline', typeof got.outline === 'string')
 
 const staged = await run({ action: 'stage', projectId, stage: 'characters' })
 check('stage moves the project', staged.stage === 'characters', staged.stage)
+check('stage reports readiness', staged.readiness === undefined || typeof staged.readiness.ok === 'boolean')
 
 let rejectedStage = false
 try {
@@ -183,6 +184,46 @@ check('create does not use the roster wording', !createText.includes('本小说�
 
 const getText = render({ action: 'get' }, afterChapter)
 check('get renders the project summary', getText.length > 0 && !getText.includes('已更新'), getText.slice(0, 80))
+// The render is the only text the model sees. If it carries just the summary,
+// the model writes from memory and invents canon — the exact failure this
+// plugin exists to prevent.
+check('get hands the boards to the model in full', getText.includes('主角：未命名'), getText.slice(0, 200))
+check('get hands the outline and the prose to the model', getText.includes('1. 改过的起') && getText.includes('正文开始。'))
+const scopedText = render({ action: 'get', chapterId }, await run({ action: 'get', projectId, chapterId }))
+check('get chapterId= returns that chapter prose', scopedText.includes('正文开始。'))
+
+// A failure must read as a failure. Returning `{message}` used to render as
+// 「小说项目已更新：…message=没有板块…」, i.e. success with an odd field.
+const failed = await tool.execute({ action: 'block', projectId, blockId: 'nope', content: 'x' })
+const failedText = render({ action: 'block' }, failed)
+check('a failed action is not reported as a successful update', !failedText.includes('已更新'), failedText)
+check('a failed action says so', /失败/.test(failedText) && /没有板块/.test(failedText), failedText)
+
+// Drafts are budgeted: a 100-chapter book must not arrive in one result.
+const multi = await run({ action: 'create', title: '多章' })
+for (let index = 0; index < 5; index += 1) {
+  const added = await run({ action: 'appendChapter', projectId: multi.projectId, title: `第 ${index + 1} 章`, outline: `大纲 ${index + 1}` })
+  await run({ action: 'chapter', projectId: multi.projectId, chapterId: added.chapter.id, draft: `正文 ${index + 1}。`, status: 'final' })
+}
+const multiText = render({ action: 'get' }, await run({ action: 'get', projectId: multi.projectId }))
+check('get expands only the last chapters by default', multiText.includes('正文 5。') && multiText.includes('正文 4。') && !multiText.includes('正文 1。'))
+check('get says how to fetch the rest', multiText.includes('chapterId=') && multiText.includes('未展开'), multiText.slice(0, 200))
+check('every outline is still present', (multiText.match(/大纲 [1-5]/g) ?? []).length === 5)
+
+// Silent truncation is data loss: refuse the write and say why.
+let refusedLong = ''
+try {
+  await run({ action: 'create', title: '超长', premise: 'x'.repeat(200_000 + 1) })
+  const over = await run({ action: 'appendChapter', projectId, title: '超长章' })
+  await run({ action: 'chapter', projectId, chapterId: over.chapter.id, draft: 'y'.repeat(200_001), status: 'final' })
+} catch (error) {
+  refusedLong = String(error.message)
+}
+check('an over-long field is refused, not silently truncated', /超过/.test(refusedLong), refusedLong)
+check(
+  'the refused write did not shorten the stored prose',
+  (await run({ action: 'get', projectId })).project.chapters[0].draft === '正文开始。',
+)
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} FAILED`)
 process.exit(failures === 0 ? 0 : 1)

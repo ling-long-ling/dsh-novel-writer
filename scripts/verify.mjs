@@ -18,6 +18,9 @@ import { ROOT } from './lib/env.mjs'
 execFileSync(process.execPath, [`${ROOT}/.selftest/prepare.mjs`], { stdio: 'pipe', cwd: ROOT })
 
 const STEPS = [
+  // Must run before the build step: the build always succeeds, so only a
+  // comparison against the committed bundle catches a stale `lib/client.js`.
+  ['Client bundle matches its sources', 'scripts/check-client-fresh.mjs'],
   ['build the Client half', 'scripts/build-client.mjs'],
   ['Host syntax', null, 'lib/index.js'],
   ['Client syntax', null, 'lib/client.js'],

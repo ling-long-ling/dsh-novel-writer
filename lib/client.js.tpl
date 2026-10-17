@@ -53,7 +53,6 @@ window.__ModuleLoader__.load({
       'action.finalize': '定稿',
       'action.reopen': '改回草稿',
       'action.next': '下一步',
-      'action.back': '上一步',
       'action.addChapter': '加一章',
       'action.deleteChapter': '删除本章',
       'action.newQuestion': '新增问题',
@@ -65,6 +64,21 @@ window.__ModuleLoader__.load({
       'questions.askTitle': '把这些待问问题交给模型，一次只问一个',
       'questions.empty': '暂无待问问题',
       'question.placeholder': '把这个问题写具体一点…',
+      'field.genre': '类型',
+      'field.premise': '一句话故事：谁想要什么，谁在阻止他，失败的代价是什么。',
+      'label.outline': '分章大纲',
+      'label.draft': '正文',
+      'label.status': '章节状态',
+      'label.empty': '空',
+      'label.finalized': '已定稿',
+      'label.draftState': '草稿',
+      'action.askOne': '问',
+      'action.askOneTitle': '交给对话单独追问',
+      'action.removeQuestion': '删除这个问题',
+      'action.outlineThis': '让模型写这一章大纲',
+      'action.writeThis': '按定稿大纲写正文',
+      'action.reviewThis': '请模型审读这一章',
+      'unit.chars': '{n} 字',
       'content.placeholder': '在这里写出这一板块的内容；不确定的留空，交给对话一起想。',
       'outline.placeholder': '这一章的大纲：场景顺序、这一章发生的"一件事"、一个转折、结尾的钩子。模型会先给一稿，你改完再定稿。',
       'draft.placeholder': '正文会出现在这里；也可以先手写草稿。',
@@ -78,6 +92,9 @@ window.__ModuleLoader__.load({
       'fail.load': '读取失败：{message}',
       'fail.loadHint': '如果一直失败，说明插件的 Host 半没有挂载：把 DSH 桌面端完全退出再打开，然后点“刷新”。',
       'status.loaded': '已载入 {n} 个项目',
+      'status.refreshed': '已刷新到最新版本',
+      'fail.conflict': '对话里已经改过这个项目，已刷新到最新版本；刚才那次编辑没有保存，请确认后重新输入',
+      'readiness.warn': '建议先补齐：{reason}',
       'status.newProject': '新项目已创建',
       'status.chapterAdded': '已追加一章',
       'dock.title': '小说',
@@ -113,7 +130,6 @@ window.__ModuleLoader__.load({
       'action.finalize': 'Finalize',
       'action.reopen': 'Back to draft',
       'action.next': 'Next',
-      'action.back': 'Back',
       'action.addChapter': 'Add chapter',
       'action.deleteChapter': 'Delete chapter',
       'action.newQuestion': 'Add question',
@@ -125,6 +141,21 @@ window.__ModuleLoader__.load({
       'questions.askTitle': 'Hand these open questions to the model, one at a time',
       'questions.empty': 'No open questions',
       'question.placeholder': 'Make the question concrete…',
+      'field.genre': 'Genre',
+      'field.premise': 'One line: who wants what, who stops them, what it costs to fail.',
+      'label.outline': 'Chapter outline',
+      'label.draft': 'Prose',
+      'label.status': 'Status',
+      'label.empty': 'empty',
+      'label.finalized': 'final',
+      'label.draftState': 'draft',
+      'action.askOne': 'Ask',
+      'action.askOneTitle': 'Hand this one question to the model',
+      'action.removeQuestion': 'Remove this question',
+      'action.outlineThis': "Have the model outline this chapter",
+      'action.writeThis': 'Write from the final outline',
+      'action.reviewThis': 'Have the model review this chapter',
+      'unit.chars': '{n} chars',
       'content.placeholder': 'Write this board here; leave gaps for the conversation to fill.',
       'outline.placeholder': 'Scene order, the one thing that happens, a turn, and a closing hook.',
       'draft.placeholder': 'The draft appears here; you can also write it by hand.',
@@ -138,6 +169,9 @@ window.__ModuleLoader__.load({
       'fail.load': 'Load failed: {message}',
       'fail.loadHint': 'If this keeps failing, the plugin Host half is not mounted: quit DSH Desktop completely, reopen it, then press Refresh.',
       'status.loaded': 'Loaded {n} projects',
+      'status.refreshed': 'Refreshed to the latest version',
+      'fail.conflict': 'The project was changed in the conversation; refreshed to the latest version. That edit was not saved.',
+      'readiness.warn': 'Fill this in first: {reason}',
       'status.newProject': 'Project created',
       'status.chapterAdded': 'Chapter added',
       'dock.title': 'Novel',
@@ -402,6 +436,8 @@ window.__ModuleLoader__.load({
       const [selected, setSelected] = React.useState(undefined)
       const [project, setProject] = React.useState(null)
       const [dirty, setDirty] = React.useState(false)
+      /** Bumped on every edit; the debounce effect depends on it. */
+      const [tick, setTick] = React.useState(0)
       const [isSaving, setSaving] = React.useState(false)
       const [message, setMessage] = React.useState('')
       const [creating, setCreating] = React.useState('')
@@ -449,6 +485,23 @@ window.__ModuleLoader__.load({
       const dirtyRef = React.useRef(false)
       dirtyRef.current = dirty
 
+      // Pull the open document again. The panel holds a whole-document snapshot,
+      // and the agent writes through the tool while it is open, so the copy on
+      // screen goes stale. Without this, the next autosave posted that stale
+      // copy and silently reverted everything the model had just written.
+      const refetch = React.useCallback(async (quiet) => {
+        if (!selected) return
+        try {
+          const value = await remoteCall(ctx, 'get', { id: selected })
+          setProject(value ?? null)
+          latest.current = value ?? null
+          setDirty(false)
+          setMessage(quiet ? '' : t('status.refreshed'))
+        } catch (error) {
+          setMessage(t('fail.load', { message: error?.message ?? String(error) }))
+        }
+      }, [selected])
+
       const update = React.useCallback((mutator) => {
         setProject((current) => {
           if (!current) return current
@@ -458,6 +511,10 @@ window.__ModuleLoader__.load({
         })
         revision.current += 1
         setDirty(true)
+        // `dirty` alone cannot restart the debounce: typing while a save is in
+        // flight left it `true`, so the effect never re-ran and the pending
+        // keystrokes were never saved until something flipped the flag.
+        setTick((value) => value + 1)
         setMessage('')
       }, [])
 
@@ -470,23 +527,36 @@ window.__ModuleLoader__.load({
           setSaving(true)
           try {
             const saved = await remoteCall(ctx, 'save', { value: document })
-            // Only adopt the Host's copy when nothing was typed while it was in
+            // Adopt the Host's copy when nothing was typed while it was in
             // flight; otherwise the author's newer text would be thrown away.
+            // Either way the new `rev` must be adopted: keeping the old one
+            // made the very next save look like a stale write and get refused.
             if (revision.current === attempted) {
               setProject(saved)
               latest.current = saved
               setDirty(false)
+            } else {
+              setProject((current) => (current ? { ...current, rev: saved.rev } : saved))
             }
             setMessage(t('action.saved'))
             reloadList()
           } catch (error) {
-            setMessage(t('fail.save', { message: error?.message ?? String(error) }))
+            const reason = error?.message ?? String(error)
+            if (reason.includes('已被更新')) {
+              // The Host refused a stale write on purpose: the agent changed the
+              // project while this panel held a snapshot. Adopt what is stored
+              // instead of retrying with the same stale copy.
+              setMessage(t('fail.conflict'))
+              await refetch(true)
+            } else {
+              setMessage(t('fail.save', { message: reason }))
+            }
           } finally {
             saving.current = false
             setSaving(false)
           }
         },
-        [reloadList],
+        [reloadList, refetch],
       )
 
       // Auto-save a moment after the author stops typing. `dirty` is the only
@@ -497,7 +567,7 @@ window.__ModuleLoader__.load({
           void save()
         }, 1200)
         return () => clearTimeout(timer)
-      }, [dirty, save])
+      }, [dirty, tick, save])
 
       // Flush unsaved text before the panel unmounts or the selection changes.
       React.useEffect(
@@ -568,7 +638,15 @@ window.__ModuleLoader__.load({
           project && h('span', { className: 'nv-chip' }, stageLabel(project.stage)),
           h(
             'button',
-            { type: 'button', className: 'nv-btn', onClick: reloadList, disabled: list.loading },
+            {
+              type: 'button',
+              className: 'nv-btn',
+              onClick: () => {
+                reloadList()
+                void refetch()
+              },
+              disabled: list.loading,
+            },
             t('action.refresh'),
           ),
           // Escape hatch: selecting a panel from the sidebar is the only way back
@@ -694,6 +772,9 @@ window.__ModuleLoader__.load({
 
       const setStage = (stage) => update((next) => ({ ...next, stage }))
       const stageIndex = STAGES.indexOf(project.stage)
+      // `readiness` lived in the shared helpers but nothing ever called it, so
+      // the panel happily walked to 「已完结」 with every chapter still an outline.
+      const check = readiness(project)
 
       const saveButton = h(
         'button',
@@ -748,6 +829,7 @@ window.__ModuleLoader__.load({
               `${t('action.next')} →`,
             ),
         ),
+        !check.ok && h('div', { className: 'nv-muted', style: { marginTop: 6 } }, t('readiness.warn', { reason: check.reason })),
         h(
           'div',
           { className: 'nv-card' },
@@ -764,7 +846,7 @@ window.__ModuleLoader__.load({
               className: 'nv-input',
               style: { flex: 1, minWidth: 120 },
               value: project.genre,
-              placeholder: '类型',
+              placeholder: t('field.genre'),
               onChange: (event) => update((next) => ({ ...next, genre: event.target.value })),
             }),
           ),
@@ -772,7 +854,7 @@ window.__ModuleLoader__.load({
             className: 'nv-textarea',
             style: { minHeight: 60, marginTop: 8 },
             value: project.premise,
-            placeholder: '一句话故事：谁想要什么，谁在阻止他，失败的代价是什么。',
+            placeholder: t('field.premise'),
             onChange: (event) => update((next) => ({ ...next, premise: event.target.value })),
           }),
           h(
@@ -859,7 +941,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'nv-row' },
-            h('span', { className: 'nv-chip', 'data-final': String(block.status === 'final') }, block.status === 'final' ? '已定稿' : '草稿'),
+            h('span', { className: 'nv-chip', 'data-final': String(block.status === 'final') }, block.status === 'final' ? t('label.finalized') : t('label.draftState')),
             h('span', { className: 'nv-muted', style: { flex: 1 } }, block.hint),
             h(
               'button',
@@ -896,16 +978,17 @@ window.__ModuleLoader__.load({
                 {
                   type: 'button',
                   className: 'nv-btn',
-                  title: '交给对话单独追问',
+                  title: t('action.askOneTitle'),
                   onClick: () => copy('interview', { blockId: block.id, focus: [question] }),
                 },
-                '问',
+                t('action.askOne'),
               ),
               h(
                 'button',
                 {
                   type: 'button',
                   className: 'nv-btn',
+                  title: t('action.removeQuestion'),
                   onClick: () => patch({ questions: block.questions.filter((_, position) => position !== index) }),
                 },
                 '×',
@@ -947,21 +1030,22 @@ window.__ModuleLoader__.load({
           ...next,
           chapters: next.chapters.map((entry) => (entry.id === id ? { ...entry, ...changes } : entry)),
         }))
-      const addChapter = () =>
-        update((next) => {
-          const created = {
-            id: `chapter-${Date.now().toString(36)}`,
-            index: next.chapters.length + 1,
-            title: `第 ${next.chapters.length + 1} 章`,
-            status: 'outline',
-            outline: '',
-            draft: '',
-            updatedAt: Date.now(),
-          }
-          next.chapters = [...next.chapters, created]
-          setTimeout(() => setChapterId(created.id), 0)
-          return next
-        })
+      // Build the chapter object *outside* the state updater: `update` is a
+      // `setState` updater, and React 18 StrictMode calls it twice, which created
+      // two ids and (worse) fired `setTimeout` from inside the updater.
+      const addChapter = () => {
+        const created = {
+          id: `chapter-${Date.now().toString(36)}`,
+          index: project.chapters.length + 1,
+          title: `第 ${project.chapters.length + 1} 章`,
+          status: 'outline',
+          outline: '',
+          draft: '',
+          updatedAt: Date.now(),
+        }
+        update((next) => ({ ...next, chapters: [...next.chapters, created] }))
+        setChapterId(created.id)
+      }
       const finals = project.chapters.filter((entry) => entry.status === 'final').length
       return h(
         'div',
@@ -998,7 +1082,7 @@ window.__ModuleLoader__.load({
                     ? t('chapter.writingState')
                     : entry.outline.trim()
                       ? t('chapter.outlineState')
-                      : '空',
+                      : t('label.empty'),
               ),
             ),
           ),
@@ -1035,7 +1119,7 @@ window.__ModuleLoader__.load({
                 t('action.deleteChapter'),
               ),
             ),
-            h('div', { style: { marginTop: 12, fontSize: 12, fontWeight: 600 } }, '分章大纲'),
+            h('div', { style: { marginTop: 12, fontSize: 12, fontWeight: 600 } }, t('label.outline')),
             h('textarea', {
               className: 'nv-textarea',
               style: { marginTop: 6 },
@@ -1049,25 +1133,41 @@ window.__ModuleLoader__.load({
               h(
                 'button',
                 { type: 'button', className: 'nv-btn', 'data-primary': 'true', onClick: () => copy('outline', { chapterId: chapter.id }) },
-                '让模型写这一章大纲',
+                t('action.outlineThis'),
               ),
               chapter.outline.trim() &&
                 h(
                   'button',
                   { type: 'button', className: 'nv-btn', onClick: () => copy('write', { chapterId: chapter.id }) },
-                  '按定稿大纲写正文',
+                  t('action.writeThis'),
                 ),
+              // Three explicit states: the Host, the tool and the chapter dot all
+              // understand `writing`, but the panel used to toggle only
+              // outline ↔ final, so a chapter could never be marked 写作中 here.
               h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'nv-btn',
-                  onClick: () => patchChapter(chapter.id, { status: chapter.status === 'final' ? 'outline' : 'final' }),
-                },
-                chapter.status === 'final' ? t('action.reopen') : t('action.finalize'),
+                'div',
+                { className: 'nv-row', style: { marginTop: 8 } },
+                h('span', { className: 'nv-muted' }, t('label.status')),
+                ...[
+                  ['outline', t('chapter.outlineState')],
+                  ['writing', t('chapter.writingState')],
+                  ['final', t('chapter.finalState')],
+                ].map(([state, label]) =>
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'nv-btn',
+                      key: state,
+                      'data-primary': String(chapter.status === state),
+                      onClick: () => patchChapter(chapter.id, { status: state }),
+                    },
+                    label,
+                  ),
+                ),
               ),
             ),
-            h('div', { style: { marginTop: 14, fontSize: 12, fontWeight: 600 } }, '正文'),
+            h('div', { style: { marginTop: 14, fontSize: 12, fontWeight: 600 } }, t('label.draft')),
             h('textarea', {
               className: 'nv-textarea',
               style: { marginTop: 6, minHeight: 200 },
@@ -1075,12 +1175,12 @@ window.__ModuleLoader__.load({
               placeholder: t('draft.placeholder'),
               onChange: (event) => patchChapter(chapter.id, { draft: event.target.value }),
             }),
-            chapter.draft && h('div', { className: 'nv-muted', style: { marginTop: 4 } }, `${chapter.draft.length} 字`),
+            chapter.draft && h('div', { className: 'nv-muted', style: { marginTop: 4 } }, t('unit.chars', { n: chapter.draft.length })),
             chapter.draft &&
               h(
                 'button',
                 { type: 'button', className: 'nv-btn', style: { marginTop: 8 }, onClick: () => copy('review', { chapterId: chapter.id }) },
-                '请模型审读这一章',
+                t('action.reviewThis'),
               ),
           ),
       )
@@ -1100,9 +1200,18 @@ window.__ModuleLoader__.load({
         const load = () => {
           remoteCall(ctx, 'list')
             .then((projects) => {
-              if (!alive) return
-              const withWork = (Array.isArray(projects) ? projects : []).find((entry) => entry.stage === 'writing') ?? projects?.[0]
-              setProject(withWork ?? null)
+              if (!alive) return undefined
+              const entries = Array.isArray(projects) ? projects : []
+              const candidate = entries.find((entry) => entry.stage === 'writing') ?? entries[0]
+              if (!candidate) {
+                setProject(null)
+                return undefined
+              }
+              // `list` returns an index (no prose); the hand-off prompts need the
+              // document itself.
+              return remoteCall(ctx, 'get', { id: candidate.id }).then((value) => {
+                if (alive) setProject(value ?? null)
+              })
             })
             .catch(() => {
               if (alive) setProject(null)

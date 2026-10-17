@@ -21,6 +21,8 @@
 | **6 个设定板块** | 内核、世界观、人物、情节、设定规则、文风；每块有 `draft/final` 状态和待问问题清单 |
 | **每章三态** | `outline → writing → final`；大纲必须先由作者修改定稿，模型才写正文 |
 | **一份数据** | 存储域 `novel_companion` → 表 `projects`（single JSON），面板和工具不是两套副本 |
+| **读得全** | 模型 `get` 拿到 6 个板块全文 + 全部大纲 + 有预算的正文；长篇可用 `chapterId` 单独取一章 |
+| **冲突保护** | 面板保存带版本号（`rev`）：对话里刚写过的内容不会被面板旧快照覆盖，冲突时自动刷新并提示 |
 | **示例项目** | 「雾港钟楼」——面板里点「载入示例」即可看到完整的一本长什么样 |
 
 面板底部按钮会把**写好的提问/指令**放进对话框草稿栏（不会冒充作者发消息），确认后按发送即可。
@@ -69,7 +71,7 @@
 node scripts/verify.mjs
 ```
 
-16 项检查，不启动应用、不改 profile：真实 Cordis Context 挂载、按模型服务商规则校验工具 schema、用极简 React 真实渲染面板、Remote 契约、模块解析、全链路模拟等。
+17 项检查，不启动应用、不改 profile：真实 Cordis Context 挂载、按模型服务商规则校验工具 schema、用极简 React 真实渲染面板、Remote 契约、模块解析、全链路模拟等。CI（`.github/workflows/verify.yml`）在 Windows + Ubuntu、Node 20/22 上跑同一套。
 
 依赖本机 DSH Desktop 安装的几项在找不到安装时会打印 `SKIP …` 而不是误报失败；可用环境变量指定位置：
 
@@ -82,6 +84,7 @@ node scripts/verify.mjs
 单项检查：
 
 ```bash
+node scripts/check-client-fresh.mjs   # client.js 是否落后于 tpl + state.js
 node scripts/audit-css.mjs            # 主题 token / 字面颜色 / 背景色当文字色
 node scripts/check-tool-schema.mjs    # novel 工具 JSON Schema
 node scripts/check-panel-render.mjs   # 面板渲染 + 层级
@@ -106,7 +109,9 @@ node .selftest/prepare.mjs && node .selftest/run.mjs
 │   └── client.js           # 由 tpl + state.js 生成，勿手改
 ├── scripts/               # 构建 + 自检/回归脚本
 │   └── lib/env.mjs        # 定位仓库与 DSH 安装（环境变量可覆盖）
+├── .github/workflows/     # CI：Windows + Ubuntu、Node 20/22 跑 verify.mjs
 ├── .selftest/             # Host 自检与共享校验回归
+├── CHANGELOG.md           # 版本变更记录
 └── docs/对话纪要.md        # 开发记录：19 轮对话、15 个真实 bug、框架踩坑
 ```
 
@@ -114,7 +119,8 @@ node .selftest/prepare.mjs && node .selftest/run.mjs
 
 - 改 Client 半：只改 `lib/client.js.tpl`，然后 `node scripts/build-client.mjs` 生成 `lib/client.js`；
 - 改 Host 半：改 `lib/index.js`，重启 DSH Desktop 验证运行时；
-- 每次提交前：`node scripts/verify.mjs` 必须通过；
+- 每次提交前：`node scripts/verify.mjs` 必须通过；CI（GitHub Actions）会跑同一套；
+- 版本记录见 [CHANGELOG.md](CHANGELOG.md)；
 - 代码风格：纯 ESM、无构建工具、无第三方运行时依赖；注释与文档用中文/英文均可；
 - 数据位置：`%DSH_HOME%\storages\novel_companion.json`（所有小说项目都在这一个文件里，可直接备份）。
 

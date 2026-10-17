@@ -123,15 +123,32 @@ check('save keeps the edited block', saved.blocks.find((block) => block.id === '
 check('save keeps the block status', saved.blocks.find((block) => block.id === 'core').status === 'final')
 check('save writes through to storage', (table.get(created.id)).blocks[0].content === '一句话内核')
 
-// A second save of the same document must not duplicate the row.
-await service.save(saved)
+// A second save must not duplicate the row. The panel always saves the
+// document the Host returned last, because it carries the new revision.
+const again = await service.save(saved)
 check('repeated saves keep one row', (await service.list()).length === 2)
+check('save bumps the revision', again.rev === saved.rev + 1, `${saved.rev} -> ${again.rev}`)
+
+// Whole-document saves make a stale copy dangerous: it would revert whatever
+// the agent wrote in the meantime, so the Host must refuse it.
+let stale = false
+try {
+  await service.save(saved)
+} catch (error) {
+  stale = /已被更新/.test(String(error.message))
+}
+check('a stale copy is refused instead of reverting storage', stale)
+check(
+  'the refused save changed nothing',
+  (await service.get(created.id))?.rev === again.rev,
+  String((await service.get(created.id))?.rev),
+)
 
 // Chapters survive a save round-trip.
-saved.chapters = [
+again.chapters = [
   { id: 'chapter-1', index: 1, title: '开端', status: 'outline', outline: '1. 场景', draft: '', updatedAt: Date.now() },
 ]
-const withChapter = await service.save(saved)
+const withChapter = await service.save(again)
 check('chapters persist', withChapter.chapters.length === 1 && withChapter.chapters[0].title === '开端')
 check('chapter indexes are normalised', withChapter.chapters[0].index === 1)
 
