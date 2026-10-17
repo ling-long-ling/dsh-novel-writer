@@ -191,7 +191,10 @@ check('apply() runs against a fake page context', applyError === undefined, appl
 check('styles were installed', styleTags.length === 1)
 check('sidebar icon registered', registrations.has('sidebar.panellist'))
 check('main panel registered', registrations.has('main'))
-check('composer dock registered', registrations.has('conversation.input.dock'))
+// The composer dock was deliberately removed: it appeared above the composer in
+// every conversation, whether or not the author was writing, and duplicated
+// controls the panel already has. Only the panel may own the novel surface.
+check('no composer dock registered', !registrations.has('conversation.input.dock'))
 
 // Skins paint an absolutely positioned artwork layer at z-index 0 inside the
 // centre column, which covers in-flow content. The panel root must therefore be
@@ -258,17 +261,7 @@ check(
   !/ctx\.remote\.novels\.\w+\(/.test(built),
 )
 
-// --- the dock and the icon must survive too --------------------------------
-const dock = registrations.get('conversation.input.dock')
-let dockError
-try {
-  effectQueue.length = 0
-  renderNode(dock.component({ sessionId: 'session-test' }))
-} catch (error) {
-  dockError = error
-}
-check('the composer dock renders without throwing', dockError === undefined, dockError?.message)
-
+// --- the icon must survive too ---------------------------------------------
 const icon = registrations.get('sidebar.panellist')
 let iconError
 try {

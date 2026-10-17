@@ -97,12 +97,6 @@ window.__ModuleLoader__.load({
       'readiness.warn': '建议先补齐：{reason}',
       'status.newProject': '新项目已创建',
       'status.chapterAdded': '已追加一章',
-      'dock.title': '小说',
-      'dock.brief': '发设定',
-      'dock.current': '本章',
-      'dock.writing': '写正文',
-      'dock.review': '审读',
-      'dock.hint': '把小说设定 / 当前章大纲带进对话',
     }
 
     const en = {
@@ -174,12 +168,6 @@ window.__ModuleLoader__.load({
       'readiness.warn': 'Fill this in first: {reason}',
       'status.newProject': 'Project created',
       'status.chapterAdded': 'Chapter added',
-      'dock.title': 'Novel',
-      'dock.brief': 'Brief',
-      'dock.current': 'This chapter',
-      'dock.writing': 'Write',
-      'dock.review': 'Review',
-      'dock.hint': 'Bring the novel brief or chapter outline into the conversation',
     }
 
     const CSS = `
@@ -235,8 +223,6 @@ window.__ModuleLoader__.load({
 .nv-dot[data-current="true"]{outline:1px solid var(--dsw-alias-label-primary)}
 .nv-toast{position:sticky;bottom:0;font-size:12px;color:var(--dsw-alias-label-secondary);padding:8px 0}
 .nv-err{color:var(--dsw-alias-state-error-primary);font-size:12px}
-.nv-dock{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:12px;flex-wrap:wrap}
-.nv-dock-title{color:var(--dsw-alias-label-secondary);margin-right:2px}
 .nv-glyph{display:block}
 `
 
@@ -1186,68 +1172,6 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /**
-     * Composer-area hand-off. Needs the session from the slot's standard props,
-     * so registration failures here never take down the panel.
-     */
-    function NovelDock(props) {
-      const ctx = props.ctx
-      const t = ctx.locale.bind(NS)
-      const sessionId = props.sessionId
-      const [project, setProject] = React.useState(null)
-      React.useEffect(() => {
-        let alive = true
-        const load = () => {
-          remoteCall(ctx, 'list')
-            .then((projects) => {
-              if (!alive) return undefined
-              const entries = Array.isArray(projects) ? projects : []
-              const candidate = entries.find((entry) => entry.stage === 'writing') ?? entries[0]
-              if (!candidate) {
-                setProject(null)
-                return undefined
-              }
-              // `list` returns an index (no prose); the hand-off prompts need the
-              // document itself.
-              return remoteCall(ctx, 'get', { id: candidate.id }).then((value) => {
-                if (alive) setProject(value ?? null)
-              })
-            })
-            .catch(() => {
-              if (alive) setProject(null)
-            })
-        }
-        load()
-        const off = ctx.on('connection/reset', load)
-        return () => {
-          alive = false
-          off()
-        }
-      }, [sessionId])
-      if (!project) return null
-      const copy = (mode, options) => {
-        copyToDraft(ctx, buildPrompt(project, mode, options), sessionId)
-      }
-      return h(
-        'div',
-        { className: 'nv-dock' },
-        h('span', { className: 'nv-dock-title' }, `${t('dock.title')}·《${project.title}》`),
-        h('button', { type: 'button', className: 'nv-btn', onClick: () => copy('brief') }, t('dock.brief')),
-        h(
-          'button',
-          {
-            type: 'button',
-            className: 'nv-btn',
-            onClick: () => {
-              const chapter = project.chapters.find((entry) => entry.status === 'writing') ?? project.chapters.find((entry) => entry.status === 'outline')
-              if (chapter) copy('write', { chapterId: chapter.id })
-            },
-          },
-          t('dock.writing'),
-        ),
-      )
-    }
-
     /** Client plugin body. */
     function apply(ctx) {
       const t = ctx.locale.bind(NS)
@@ -1271,14 +1195,10 @@ window.__ModuleLoader__.load({
           h(NovelPanel, { ...props, ctx }),
         ),
       )
-      // Composer hand-off. `slots.inject` is a soft dependency: when this
-      // composition has no composer dock, the callback simply never runs, so no
-      // try/catch is needed here (the callback runs later, at declaration time).
-      ctx.slots.inject('conversation.input.dock', () =>
-        ctx.slots.register({ name: 'conversation.input.dock', id: 'novel-companion', order: 40, locale: NS }, (props) =>
-          h(NovelDock, { ...props, ctx }),
-        ),
-      )
+      // No `conversation.input.dock` entry on purpose. A hand-off row above the
+      // composer appeared in EVERY conversation, whether or not the author was
+      // writing, and it duplicated controls the panel already has. The panel is
+      // the only surface for the novel; the composer stays untouched.
     }
 
     // `conversation` and `uiSession` are read lazily through `ctx.get` for the
