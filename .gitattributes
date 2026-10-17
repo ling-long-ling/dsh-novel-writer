@@ -1,0 +1,6 @@
+# Keep source files LF in the repository so the checks behave the same on every OS.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.zip binary

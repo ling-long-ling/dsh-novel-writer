@@ -1,0 +1,6 @@
+# dsh-novel-companion — 小说创作搭档
+# Host half: project storage + Remote API + agent tools.
+# Client half: the 「小说」 panel in the sidebar, plus a hand-off strip above the composer.
+- insert:
+    - id: novel-companion
+      name: dsh-novel-companion

@@ -1,0 +1,47 @@
+{
+  "name": "dsh-novel-companion",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Novel writing companion: interview the author about world, characters and plot, finalize an outline per chapter, then write chapter drafts.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ling-long-ling/dsh-novel-companion.git"
+  },
+  "homepage": "https://github.com/ling-long-ling/dsh-novel-companion#readme",
+  "bugs": {
+    "url": "https://github.com/ling-long-ling/dsh-novel-companion/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh-desktop",
+    "novel-writing",
+    "ai-writing",
+    "creative-writing"
+  ],
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "lib",
+    "locale",
+    "cordis.patch.yml",
+    "icon.svg"
+  ],
+  "icon": "./icon.svg",
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  }
+}
