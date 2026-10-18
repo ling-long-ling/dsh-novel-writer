@@ -78,7 +78,17 @@ check('tool description is not mojibake', !MOJIBAKE.test(tool.description ?? '')
 check(
   'action enum lists every action runNovelAction handles',
   JSON.stringify(schema?.properties?.action?.enum) ===
-    JSON.stringify(['list', 'get', 'create', 'stage', 'block', 'outline', 'chapter', 'appendChapter']),
+    JSON.stringify(['list', 'get', 'create', 'stage', 'block', 'outline', 'chapter', 'appendChapter', 'search']),
+)
+check(
+  'chapterIndex is offered as the id fallback',
+  schema?.properties?.chapterIndex?.type === 'integer',
+  JSON.stringify(schema?.properties?.chapterIndex),
+)
+check(
+  'context offers every prose mode',
+  JSON.stringify(schema?.properties?.context?.enum) === JSON.stringify(['prev', 'recent', 'all', 'none']),
+  JSON.stringify(schema?.properties?.context?.enum),
 )
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} FAILED`)

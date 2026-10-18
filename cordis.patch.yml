@@ -1,6 +1,6 @@
 # dsh-novel-companion — 小说创作搭档
 # Host half: project storage + Remote API + agent tools.
-# Client half: the 「小说」 panel in the sidebar, plus a hand-off strip above the composer.
+# Client half: the 「小说」 panel in the sidebar. (The composer hand-off strip was removed in v1.0.2.)
 - insert:
     - id: novel-companion
       name: dsh-novel-companion

@@ -144,6 +144,16 @@ check(
   String((await service.get(created.id))?.rev),
 )
 
+// A partial document must never be repaired into a blank book on the write path.
+let halfRefused = ''
+try {
+  await service.save({ id: created.id, blocks: [] })
+} catch (error) {
+  halfRefused = String(error.message)
+}
+check('save refuses a half document', /半份|缺少/.test(halfRefused), halfRefused)
+check('the refused half document left the project intact', (await service.get(created.id))?.title === '测试新书')
+
 // Chapters survive a save round-trip.
 again.chapters = [
   { id: 'chapter-1', index: 1, title: '开端', status: 'outline', outline: '1. 场景', draft: '', updatedAt: Date.now() },

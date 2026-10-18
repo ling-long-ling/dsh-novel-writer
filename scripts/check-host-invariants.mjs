@@ -34,6 +34,12 @@ const CHECKS = [
   ['tool registered through ctx.tools', /ctx\.tools\.register\(/],
   ['prompt section registered', /systemPrompt/],
   ['demo project externalised', /buildDemoProject/],
+  // Data-loss guard: `normalizeProject` repairs on read, but a write must
+  // refuse a partial document instead of clearing the book with defaults.
+  ['save method refuses a half document', /missingProjectFields\(value\)/],
+  ['store refuses a half document', /missingProjectFields\(project\)/],
+  ['stage gate honours force', /args\.force !== true/],
+  ['search action is registered', /'appendChapter', 'search'/],
   [
     'no browser-only globals in the Host half',
     // Strip comments first: prose like "into a document" is not a global usage.

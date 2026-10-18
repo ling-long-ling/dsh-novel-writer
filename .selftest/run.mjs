@@ -6,7 +6,7 @@
  * prompt helpers are checked for the facts the agent depends on.
  */
 import { ProjectStore, ProjectCache, runNovelAction, renderNovelBrief, novelTool } from './index.mjs'
-import { emptyProject, buildPrompt, normalizeProject, outlineMarkdown, projectSummary, readiness } from './state.mjs'
+import { emptyProject, buildPrompt, missingProjectFields, normalizeProject, outlineMarkdown, projectIntegrity, projectMarkdown, projectSummary, readiness } from './state.mjs'
 import { buildDemoProject } from './demo.mjs'
 
 let failures = 0
@@ -137,12 +137,48 @@ check(
     { chapterId: 'c1' },
   ).includes('第 1 章 雨夜'),
 )
+const promptChapter = { ...base, id: 'abc', chapters: [{ id: 'c1', index: 1, title: '雨夜', status: 'outline', outline: 'o', draft: '' }] }
+check(
+  'buildPrompt write carries the ids the model must write back with',
+  buildPrompt(promptChapter, 'write', { chapterId: 'c1' }).includes('chapterId=c1') &&
+    buildPrompt(promptChapter, 'write', { chapterId: 'c1' }).includes('projectId=abc'),
+)
+check(
+  'buildPrompt outline asks the model to save the outline back',
+  buildPrompt(promptChapter, 'outline', { chapterId: 'c1' }).includes('novel action=outline'),
+)
 check('projectSummary exposes the stage', projectSummary(base).includes('了解你'))
 check(
   'outlineMarkdown renders headings',
   outlineMarkdown({ ...base, chapters: [{ id: 'c1', index: 1, title: 'A', status: 'outline', outline: 'o' }] }).includes(
     '## 1. A',
   ),
+)
+check(
+  'outlineMarkdown exposes the chapterId the model must write back with',
+  outlineMarkdown({ ...base, chapters: [{ id: 'c1', index: 1, title: 'A', status: 'outline', outline: 'o' }] }).includes(
+    'chapterId=c1',
+  ),
+)
+const twoChapters = {
+  ...base,
+  chapters: [
+    { id: 'c1', index: 1, title: 'A', status: 'final', outline: 'o1', draft: '早'.repeat(500) },
+    { id: 'c2', index: 2, title: 'B', status: 'final', outline: 'o2', draft: '近'.repeat(500) },
+  ],
+}
+const renderedProject = projectMarkdown(twoChapters)
+check('projectMarkdown exposes every chapterId', renderedProject.includes('chapterId=c1') && renderedProject.includes('chapterId=c2'))
+check('projectMarkdown previews the chapter before the one being written', /首尾各 \d+ 字节选/.test(renderedProject))
+check(
+  'projectMarkdown can fold all prose on request',
+  (projectMarkdown(twoChapters, { context: 'none' }).match(/未展开/g) ?? []).length === 2,
+)
+check('a complete document passes the write guard', missingProjectFields(emptyProject('abc', 'x')) === '')
+check('a half document is refused by the write guard', /缺少/.test(missingProjectFields({ id: 'abc', blocks: [] })))
+check(
+  'projectIntegrity flags a project wiped by a partial save',
+  projectIntegrity({ title: '未命名小说', chapters: [], createdAt: 0, blocks: [{ content: '留下来的设定' }] }) !== '',
 )
 check(
   'readiness reports an unwritten outline',

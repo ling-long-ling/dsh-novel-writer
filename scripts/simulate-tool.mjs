@@ -143,6 +143,13 @@ const afterChapter = await run({ action: 'get', projectId })
 check('prose persisted', afterChapter.project.chapters[0].draft === '正文开始。')
 check('chapter status persisted', afterChapter.project.chapters[0].status === 'final')
 
+// chapterId is now rendered, but accept chapterIndex and a bare numeric id too:
+// a model that read the old outline (or counted chapters) should still land.
+const byIndex = await run({ action: 'outline', projectId, chapterIndex: 1, outline: '1. 按序号改的起' })
+check('outline accepts chapterIndex instead of chapterId', byIndex.ok !== false && byIndex.chapter.index === 1)
+const byBareId = await run({ action: 'outline', projectId, chapterId: '1', outline: '1. 改过的起\n2. 改过的承' })
+check('outline accepts a bare numeric chapterId', byBareId.ok !== false)
+
 let missingId = false
 try {
   await run({ action: 'get' })
@@ -191,6 +198,10 @@ check('get hands the boards to the model in full', getText.includes('主角：�
 check('get hands the outline and the prose to the model', getText.includes('1. 改过的起') && getText.includes('正文开始。'))
 const scopedText = render({ action: 'get', chapterId }, await run({ action: 'get', projectId, chapterId }))
 check('get chapterId= returns that chapter prose', scopedText.includes('正文开始。'))
+const scopedByIndex = render({ action: 'get', chapterIndex: 1 }, await run({ action: 'get', projectId, chapterIndex: 1 }))
+check('get chapterIndex= returns that chapter prose', scopedByIndex.includes('正文开始。'))
+const renderGet = render({ action: 'get' }, afterChapter)
+check('get hands over chapterId in the document view', renderGet.includes(chapterId), renderGet.slice(0, 200))
 
 // A failure must read as a failure. Returning `{message}` used to render as
 // 「小说项目已更新：…message=没有板块…」, i.e. success with an odd field.
@@ -201,14 +212,76 @@ check('a failed action says so', /失败/.test(failedText) && /没有板块/.tes
 
 // Drafts are budgeted: a 100-chapter book must not arrive in one result.
 const multi = await run({ action: 'create', title: '多章' })
+const multiIds = []
 for (let index = 0; index < 5; index += 1) {
   const added = await run({ action: 'appendChapter', projectId: multi.projectId, title: `第 ${index + 1} 章`, outline: `大纲 ${index + 1}` })
+  multiIds.push(added.chapter.id)
   await run({ action: 'chapter', projectId: multi.projectId, chapterId: added.chapter.id, draft: `正文 ${index + 1}。`, status: 'final' })
 }
 const multiText = render({ action: 'get' }, await run({ action: 'get', projectId: multi.projectId }))
-check('get expands only the last chapters by default', multiText.includes('正文 5。') && multiText.includes('正文 4。') && !multiText.includes('正文 1。'))
-check('get says how to fetch the rest', multiText.includes('chapterId=') && multiText.includes('未展开'), multiText.slice(0, 200))
+check('get expands the previous chapter in full', /正文（共 5 字）：\n正文 5。/.test(multiText))
+check(
+  'get previews earlier chapters instead of dropping them',
+  (multiText.match(/首尾各 \d+ 字节选/g) ?? []).length === 4,
+  multiText.slice(0, 200),
+)
+// Every chapter heading must carry the id: without it the model cannot call
+// action=chapter/outline at all (this was the P0 that broke the whole loop).
+check('get exposes every chapterId to the model', multiIds.every((id) => multiText.includes(id)), multiIds.join(','))
+check('get says how to fetch the rest', multiText.includes('action=get chapterId='))
 check('every outline is still present', (multiText.match(/大纲 [1-5]/g) ?? []).length === 5)
+
+// context modes: none must not ship any prose, all must ship every chapter.
+const noneText = render({ action: 'get' }, await run({ action: 'get', projectId: multi.projectId, context: 'none' }))
+check('get context=none keeps every chapter but no prose', (noneText.match(/未展开/g) ?? []).length === 5, noneText.slice(0, 200))
+const allText = render({ action: 'get' }, await run({ action: 'get', projectId: multi.projectId, context: 'all' }))
+check('get context=all ships all five drafts', ['正文 1。', '正文 2。', '正文 3。', '正文 4。', '正文 5。'].every((line) => allText.includes(line)))
+
+// A retried agent step used to append a second identical chapter silently.
+const repeated = await run({ action: 'appendChapter', projectId: multi.projectId, title: '第 6 章', outline: '重复调用的大纲' })
+const repeatedAgain = await run({ action: 'appendChapter', projectId: multi.projectId, title: '第 6 章', outline: '重复调用的大纲' })
+check('appendChapter is idempotent for a retried call', repeatedAgain.reused === true && repeatedAgain.chapter.id === repeated.chapter.id)
+check(
+  'a retried append did not add a second chapter',
+  (await run({ action: 'get', projectId: multi.projectId })).project.chapters.length === 6,
+)
+check(
+  'appendChapter hand-off exposes the new chapterId',
+  render({ action: 'appendChapter' }, repeated).includes(repeated.chapter.id),
+)
+
+// ---- stage gate, search, half-document guard -----------------------------
+let unreadyStage = ''
+try {
+  await run({ action: 'stage', projectId, stage: 'done' })
+} catch (error) {
+  unreadyStage = String(error.message)
+}
+check('stage refuses an unready target unless forced', /还没准备好/.test(unreadyStage), unreadyStage)
+const forcedStage = await run({ action: 'stage', projectId, stage: 'done', force: true })
+check('stage force overrides the check', forcedStage.stage === 'done' && forcedStage.forced === true)
+check('forced stage still reports the unready reason', forcedStage.readiness.ok === false)
+check('forced stage renders its warning', /还没准备好/.test(render({ action: 'stage' }, forcedStage)))
+
+const found = await run({ action: 'search', projectId, query: '正文开始' })
+check('search finds prose', Array.isArray(found.hits) && found.hits.length >= 1)
+check('search hands over the chapterId', render({ action: 'search' }, found).includes(chapterId))
+check(
+  'search reports an honest empty result',
+  render({ action: 'search' }, await run({ action: 'search', projectId, query: '不存在的道具' })).includes('没有命中'),
+)
+
+// A whole-document save missing title/blocks/chapters/stage used to be repaired
+// into "未命名小说 / 0 章" and stored, silently wiping the book.
+const service = host.__createNovelServiceForTest(cache)
+let halfRefused = ''
+try {
+  await service.save({ id: projectId, blocks: [] })
+} catch (error) {
+  halfRefused = String(error.message)
+}
+check('save refuses a half document', /半份|缺少/.test(halfRefused), halfRefused)
+check('the refused half document changed nothing', (await service.get(projectId)).title === '长夜')
 
 // Silent truncation is data loss: refuse the write and say why.
 let refusedLong = ''

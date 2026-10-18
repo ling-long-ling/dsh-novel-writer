@@ -1,9 +1,12 @@
 {
   "name": "dsh-novel-companion",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "type": "module",
   "engines": {
     "node": ">=20"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3"
   },
   "scripts": {
     "build:client": "node scripts/build-client.mjs",

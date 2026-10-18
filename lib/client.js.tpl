@@ -679,7 +679,7 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { className: 'nv-item-sub' },
-                  `${stageLabel(entry.stage)} · ${entry.chapters.length} 章`,
+                  `${stageLabel(entry.stage)} · ${entry.chapters.length} 章${entry.characters > 0 ? ` · ${entry.characters} 字` : ''}${entry.damaged ? ' · ⚠️ 疑似损坏' : ''}`,
                 ),
               ),
             ),
