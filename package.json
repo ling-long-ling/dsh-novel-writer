@@ -17,11 +17,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ling-long-ling/dsh-novel-companion.git"
+    "url": "git+https://github.com/ling-long-ling/dsh-novel-writer.git"
   },
-  "homepage": "https://github.com/ling-long-ling/dsh-novel-companion#readme",
+  "homepage": "https://github.com/ling-long-ling/dsh-novel-writer#readme",
   "bugs": {
-    "url": "https://github.com/ling-long-ling/dsh-novel-companion/issues"
+    "url": "https://github.com/ling-long-ling/dsh-novel-writer/issues"
   },
   "keywords": [
     "dsh-plugin",
