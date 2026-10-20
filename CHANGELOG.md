@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.2.0
+
+依据第三轮复查报告《dsh-novel-writer v1.1.0 复查与测试报告》，收口「极端输入下的失守」——上轮 P0 已修好，本轮聚焦边界：`all` 会爆上下文、面板能一键删章、并发保存吞字、500 章静默丢章。
+
+### 上下文预算（P1）
+
+- **`context=all` 加整本总量预算**：`ALL_CONTEXT_BUDGET = 120_000` 字（约 75k tokens），超过就降级为
+  `prev` 并在结果里提示「整本正文 N 字，超过单次读取预算，已按 prev 策略展开」。120 章 × 3000 字
+  实测从 ≈231k tokens 降到约 6.3k tokens，不再一击爆窗。
+- **章节目录窗口化**：`get` 只完整渲染聚焦章附近 ±8 章（`CHAPTER_INDEX_WINDOW`），其余折叠成
+  `第 1–480 章（共 N 章，目录已折叠）` 一行并提示用 `action=get chapterIndex=…` 按需读。500 章时
+  光目录就从 ≈50k tokens 降到千字级。
+
+### 数据安全（P1）
+
+- **`save` 拒绝超过 500 章**：面板整篇保存过去会走 `normalizeProject` 的 `slice(0, 500)` 静默丢章
+  且报成功；现在写路径显式报错，和 `appendChapter` 的上限对齐。
+- **面板删章两段式 + 撤销条**：删章从「一键即删」改成「第一次点确认、第二次点删除」，删除后
+  保留 5 秒撤销条可恢复，不再一次误触毁掉一整章。
+- **冲突重拉不再吞字**：`save()` 遇到「已被更新」时先判 `revision`——期间作者又打了字就保留本地
+  输入并提示「请点保存合并」，只有确认没有新输入才重拉远端。并发窗口里刚敲的字不再被静默覆盖。
+
+### 工程收尾（P2）
+
+- **`get` 的 value 不再附整本 project**：模型只读 `output.render`（用 `markdown`），value 里整本
+  JSON 只是白白塞进会话记录与日志；现在只留 `{ projectId, rev, brief, markdown, outline }`。
+- 回归断言补进 `.selftest/run.mjs`（预算降级、目录折叠）、`scripts/simulate-tool.mjs`（改用
+  内存缓存读文档、断言 value 瘦身）、`check-host-invariants.mjs`（500 章守卫）。
+
 ## 1.1.0
 
 依据第二轮审查报告《dsh-novel-companion 审查报告》，修完 **P0（对话闭环）**、落地高价值 P1，并补上工程收尾。

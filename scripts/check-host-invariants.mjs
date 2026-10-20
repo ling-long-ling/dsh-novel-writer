@@ -40,6 +40,9 @@ const CHECKS = [
   ['store refuses a half document', /missingProjectFields\(project\)/],
   ['stage gate honours force', /args\.force !== true/],
   ['search action is registered', /'appendChapter', 'search'/],
+  // A whole-document save must not let chapter 501 slip through normalizeProject's
+  // silent slice and vanish.
+  ['store refuses more than MAX_CHAPTERS', /project\.chapters\.length > MAX_CHAPTERS/],
   [
     'no browser-only globals in the Host half',
     // Strip comments first: prose like "into a document" is not a global usage.

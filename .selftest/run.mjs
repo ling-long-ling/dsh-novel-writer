@@ -77,7 +77,8 @@ check('chapter draft saved and finalized', written.status === 'final')
 const got = await runNovelAction(cache, { action: 'get', projectId: id })
 check('get returns a brief naming the project', got.brief.includes('测试书'))
 check('get returns the outline', got.outline.includes('开局'))
-check('get returns the draft', got.project.chapters[0].draft === '正文……')
+check('get returns the draft in markdown', got.markdown.includes('正文……'))
+check('get no longer ships the whole project object', got.project === undefined)
 
 let rejected = false
 try {
@@ -174,6 +175,38 @@ check(
   'projectMarkdown can fold all prose on request',
   (projectMarkdown(twoChapters, { context: 'none' }).match(/未展开/g) ?? []).length === 2,
 )
+// context=all degrades to prev once the whole prose stack exceeds the budget.
+const hugeBook = {
+  ...base,
+  chapters: Array.from({ length: 3 }, (_, index) => ({
+    id: `c${index + 1}`,
+    index: index + 1,
+    title: `章${index + 1}`,
+    status: 'final',
+    outline: 'o',
+    draft: '雾'.repeat(80_000),
+  })),
+}
+const degradedAll = projectMarkdown(hugeBook, { context: 'all' })
+check('context=all over budget degrades to prev and says so', /超过单次读取预算/.test(degradedAll), degradedAll.slice(-200))
+const smallAll = projectMarkdown(twoChapters, { context: 'all' })
+check('context=all within budget stays all', !/超过单次读取预算/.test(smallAll))
+// A long chapter index folds far-away headings into a range line instead of
+// printing all of them.
+const manyChapters = {
+  ...base,
+  chapters: Array.from({ length: 40 }, (_, index) => ({
+    id: `c${index + 1}`,
+    index: index + 1,
+    title: `第${index + 1}章`,
+    status: 'outline',
+    outline: 'o',
+    draft: '',
+  })),
+}
+const windowed = projectMarkdown(manyChapters, { context: 'none' })
+check('a long chapter index folds distant headings', /目录已折叠/.test(windowed), windowed.slice(0, 120))
+check('the folded range still names the chapter numbers', /第 \d+–\d+ 章/.test(windowed))
 check('a complete document passes the write guard', missingProjectFields(emptyProject('abc', 'x')) === '')
 check('a half document is refused by the write guard', /缺少/.test(missingProjectFields({ id: 'abc', blocks: [] })))
 check(

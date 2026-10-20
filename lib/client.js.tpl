@@ -55,6 +55,8 @@ window.__ModuleLoader__.load({
       'action.next': '下一步',
       'action.addChapter': '加一章',
       'action.deleteChapter': '删除本章',
+      'action.deleteChapterConfirm': '再点一次确认删除本章',
+      'action.undoDelete': '撤销删除',
       'action.newQuestion': '新增问题',
       'stage': '阶段',
       'blocks': '设定板块',
@@ -94,6 +96,7 @@ window.__ModuleLoader__.load({
       'status.loaded': '已载入 {n} 个项目',
       'status.refreshed': '已刷新到最新版本',
       'fail.conflict': '对话里已经改过这个项目，已刷新到最新版本；刚才那次编辑没有保存，请确认后重新输入',
+      'fail.conflictKept': '对话里刚改过这个项目，你此刻的输入已保留；请点「保存」把两边合并到一起',
       'readiness.warn': '建议先补齐：{reason}',
       'status.newProject': '新项目已创建',
       'status.chapterAdded': '已追加一章',
@@ -126,6 +129,8 @@ window.__ModuleLoader__.load({
       'action.next': 'Next',
       'action.addChapter': 'Add chapter',
       'action.deleteChapter': 'Delete chapter',
+      'action.deleteChapterConfirm': 'Click again to delete this chapter',
+      'action.undoDelete': 'Undo delete',
       'action.newQuestion': 'Add question',
       'stage': 'Stage',
       'blocks': 'Boards',
@@ -165,6 +170,7 @@ window.__ModuleLoader__.load({
       'status.loaded': 'Loaded {n} projects',
       'status.refreshed': 'Refreshed to the latest version',
       'fail.conflict': 'The project was changed in the conversation; refreshed to the latest version. That edit was not saved.',
+      'fail.conflictKept': 'The project was just changed in the conversation; your current typing is kept. Press Save to merge the two.',
       'readiness.warn': 'Fill this in first: {reason}',
       'status.newProject': 'Project created',
       'status.chapterAdded': 'Chapter added',
@@ -529,11 +535,17 @@ window.__ModuleLoader__.load({
           } catch (error) {
             const reason = error?.message ?? String(error)
             if (reason.includes('已被更新')) {
-              // The Host refused a stale write on purpose: the agent changed the
-              // project while this panel held a snapshot. Adopt what is stored
-              // instead of retrying with the same stale copy.
-              setMessage(t('fail.conflict'))
-              await refetch(true)
+              // The Host refused a stale write: the agent changed the project
+              // while this panel held a snapshot. If the author kept typing while
+              // the save was in flight, that newer text is *not* stale — it is
+              // local work that a blind refetch would wipe. Keep it and ask the
+              // author to re-save instead of silently discarding a chapter.
+              if (revision.current !== attempted) {
+                setMessage(t('fail.conflictKept'))
+              } else {
+                setMessage(t('fail.conflict'))
+                await refetch(true)
+              }
             } else {
               setMessage(t('fail.save', { message: reason }))
             }
@@ -1011,11 +1023,51 @@ window.__ModuleLoader__.load({
     /** Chapter list plus the current chapter's outline and draft. */
     function ChapterView(props) {
       const { project, chapter, setChapterId, update, copy, t } = props
+      const [pendingDelete, setPendingDelete] = React.useState(null)
       const patchChapter = (id, changes) =>
         update((next) => ({
           ...next,
           chapters: next.chapters.map((entry) => (entry.id === id ? { ...entry, ...changes } : entry)),
         }))
+      // Deleting a chapter is the one path where a single click can erase a whole
+      // day's prose, and the save is whole-document so there is no history to
+      // roll back. Two phases: the first click arms a confirm; the second click
+      // deletes but keeps the removed chapter in `pendingDelete` so the author can
+      // undo within the next few seconds.
+      const askDelete = (id) => {
+        const target = project.chapters.find((entry) => entry.id === id)
+        setPendingDelete(target ? { armed: true, chapter: target } : null)
+      }
+      const confirmDelete = () => {
+        if (!pendingDelete || !pendingDelete.armed) return
+        const removed = pendingDelete.chapter
+        update((next) => {
+          next.chapters = next.chapters.filter((entry) => entry.id !== removed.id)
+          next.chapters.forEach((entry, index) => {
+            entry.index = index + 1
+          })
+          return next
+        })
+        if (chapter && chapter.id === removed.id) {
+          const remaining = project.chapters.filter((entry) => entry.id !== removed.id)
+          setChapterId(remaining[0]?.id ?? '')
+        }
+        setPendingDelete({ armed: false, chapter: removed })
+      }
+      const undoDelete = () => {
+        if (!pendingDelete) return
+        const removed = pendingDelete.chapter
+        update((next) => {
+          next.chapters = [...next.chapters, removed]
+          next.chapters.sort((a, b) => a.index - b.index)
+          next.chapters.forEach((entry, index) => {
+            entry.index = index + 1
+          })
+          return next
+        })
+        setChapterId(removed.id)
+        setPendingDelete(null)
+      }
       // Build the chapter object *outside* the state updater: `update` is a
       // `setState` updater, and React 18 StrictMode calls it twice, which created
       // two ids and (worse) fired `setTimeout` from inside the updater.
@@ -1073,6 +1125,21 @@ window.__ModuleLoader__.load({
             ),
           ),
         ),
+        pendingDelete && !pendingDelete.armed &&
+          h(
+            'div',
+            { className: 'nv-card', style: { marginTop: 8 } },
+            h(
+              'div',
+              { className: 'nv-row' },
+              h('span', { className: 'nv-muted', style: { flex: 1 } }, `已删除「${pendingDelete.chapter.title}」`),
+              h(
+                'button',
+                { type: 'button', className: 'nv-btn', 'data-primary': 'true', onClick: undoDelete },
+                t('action.undoDelete'),
+              ),
+            ),
+          ),
         chapter &&
           h(
             'div',
@@ -1093,16 +1160,14 @@ window.__ModuleLoader__.load({
                   type: 'button',
                   className: 'nv-btn',
                   'data-danger': 'true',
-                  onClick: () =>
-                    update((next) => {
-                      next.chapters = next.chapters.filter((entry) => entry.id !== chapter.id)
-                      next.chapters.forEach((entry, index) => {
-                        entry.index = index + 1
-                      })
-                      return next
-                    }),
+                  onClick: () => {
+                    if (pendingDelete?.armed && pendingDelete.chapter.id === chapter.id) confirmDelete()
+                    else askDelete(chapter.id)
+                  },
                 },
-                t('action.deleteChapter'),
+                pendingDelete?.armed && pendingDelete.chapter.id === chapter.id
+                  ? t('action.deleteChapterConfirm')
+                  : t('action.deleteChapter'),
               ),
             ),
             h('div', { style: { marginTop: 12, fontSize: 12, fontWeight: 600 } }, t('label.outline')),

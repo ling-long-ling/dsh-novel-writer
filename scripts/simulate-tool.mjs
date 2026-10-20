@@ -55,6 +55,10 @@ await cache.refresh()
 
 // `runNovelAction` is the tool's executor; `arg` is the schema-validated input.
 const run = (arg) => host.runNovelAction(cache, arg)
+// `get` no longer ships the whole project in its value (only markdown/outline),
+// so internal assertions read the live document straight from the in-memory
+// cache instead of reaching into the tool result.
+const doc = (id) => cache.get(id)
 
 // The rendered text is what the model actually reads. Asserting only on the
 // returned object let a wrong message ("小说项目已更新：projects=[]") ship, so
@@ -86,7 +90,7 @@ check('create returns a brief', typeof created.brief === 'string' && created.bri
 const projectId = created.projectId
 
 const got = await run({ action: 'get', projectId })
-check('get returns the whole document', got.project?.id === projectId)
+check('get returns the project id and outline, without the whole document', got.projectId === projectId && got.project === undefined)
 check('get returns a rendered outline', typeof got.outline === 'string')
 
 const staged = await run({ action: 'stage', projectId, stage: 'characters' })
@@ -110,8 +114,7 @@ const blocked = await run({
   questions: ['他为什么离开？', '他最怕什么？'],
 })
 check('block writes content', blocked.ok !== false)
-const afterBlock = await run({ action: 'get', projectId })
-const characterBlock = afterBlock.project.blocks.find((block) => block.id === 'characters')
+const characterBlock = doc(projectId).blocks.find((block) => block.id === 'characters')
 check('block content persisted', characterBlock.content === '主角：未命名')
 check('block status persisted', characterBlock.status === 'final')
 check('block questions replaced', characterBlock.questions.length === 2, JSON.stringify(characterBlock.questions))
@@ -130,18 +133,16 @@ const chapterId = appended.chapter.id
 
 const outlined = await run({ action: 'outline', projectId, chapterId, outline: '1. 改过的起\n2. 改过的承' })
 check('outline saves author edits', outlined.ok !== false)
-const afterOutline = await run({ action: 'get', projectId })
 check(
   'outline persisted',
-  afterOutline.project.chapters[0].outline === '1. 改过的起\n2. 改过的承',
-  afterOutline.project.chapters[0].outline,
+  doc(projectId).chapters[0].outline === '1. 改过的起\n2. 改过的承',
+  doc(projectId).chapters[0].outline,
 )
 
 const written = await run({ action: 'chapter', projectId, chapterId, draft: '正文开始。', status: 'final' })
 check('chapter saves the prose', written.ok !== false)
-const afterChapter = await run({ action: 'get', projectId })
-check('prose persisted', afterChapter.project.chapters[0].draft === '正文开始。')
-check('chapter status persisted', afterChapter.project.chapters[0].status === 'final')
+check('prose persisted', doc(projectId).chapters[0].draft === '正文开始。')
+check('chapter status persisted', doc(projectId).chapters[0].status === 'final')
 
 // chapterId is now rendered, but accept chapterIndex and a bare numeric id too:
 // a model that read the old outline (or counted chapters) should still land.
@@ -189,7 +190,7 @@ const createText = render({ action: 'create' }, created)
 check('create renders its project brief, not the roster', createText.includes('长夜') && !createText.includes('共有'), createText)
 check('create does not use the roster wording', !createText.includes('本小说项目'), createText)
 
-const getText = render({ action: 'get' }, afterChapter)
+const getText = render({ action: 'get' }, await run({ action: 'get', projectId }))
 check('get renders the project summary', getText.length > 0 && !getText.includes('已更新'), getText.slice(0, 80))
 // The render is the only text the model sees. If it carries just the summary,
 // the model writes from memory and invents canon — the exact failure this
@@ -200,8 +201,7 @@ const scopedText = render({ action: 'get', chapterId }, await run({ action: 'get
 check('get chapterId= returns that chapter prose', scopedText.includes('正文开始。'))
 const scopedByIndex = render({ action: 'get', chapterIndex: 1 }, await run({ action: 'get', projectId, chapterIndex: 1 }))
 check('get chapterIndex= returns that chapter prose', scopedByIndex.includes('正文开始。'))
-const renderGet = render({ action: 'get' }, afterChapter)
-check('get hands over chapterId in the document view', renderGet.includes(chapterId), renderGet.slice(0, 200))
+check('get hands over chapterId in the document view', getText.includes(chapterId), getText.slice(0, 200))
 
 // A failure must read as a failure. Returning `{message}` used to render as
 // 「小说项目已更新：…message=没有板块…」, i.e. success with an odd field.
@@ -243,7 +243,7 @@ const repeatedAgain = await run({ action: 'appendChapter', projectId: multi.proj
 check('appendChapter is idempotent for a retried call', repeatedAgain.reused === true && repeatedAgain.chapter.id === repeated.chapter.id)
 check(
   'a retried append did not add a second chapter',
-  (await run({ action: 'get', projectId: multi.projectId })).project.chapters.length === 6,
+  doc(multi.projectId).chapters.length === 6,
 )
 check(
   'appendChapter hand-off exposes the new chapterId',
@@ -295,7 +295,7 @@ try {
 check('an over-long field is refused, not silently truncated', /超过/.test(refusedLong), refusedLong)
 check(
   'the refused write did not shorten the stored prose',
-  (await run({ action: 'get', projectId })).project.chapters[0].draft === '正文开始。',
+  doc(projectId).chapters[0].draft === '正文开始。',
 )
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} FAILED`)
